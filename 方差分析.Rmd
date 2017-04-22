@@ -1,0 +1,133 @@
+---
+title: "方差分析"
+output: github_document
+---
+###前言
+之前的预测问题都是基于量化的预测变量和响应变量，当预测变量是因子或者解释性变量的时候，回归模型无法很好的解释，此时，我们利用方差分析来解释不同组的差别(ANOVA)。这一章节涉及的软件包有gplots,car,multcomp,HH等，请自行下载。
+
+#### ANOVA模型
+ANOVA其实是广义线性模型的一种特殊形式，aov()函数提供的结果是比较不同组之间差异的显著性，而回归模型提供的结果是预测的值。
+```{r eval=F}
+aov(formula,data=dataframe)
+formula:Y~A+B+A:B+A*B
+四种变量关系，单独的影响，交互效应，交叉影响
+```
+
+####1.单因素方差分析
+导入数据集cholesterol，治疗效果和药物每天注射量和注射次数的关系。
+```{r message=F,warning=F,collapse=T}
+library(multcomp)
+attach(cholesterol)
+table(trt)
+aggregate(response,by=list(trt),FUN=mean)
+aggregate(response,by=list(trt),FUN=sd)
+fit<-aov(response~trt)
+summary(fit)
+```
+table的结果表明每位病人都接受了每种治疗方案，aggregate的结果表明，drugE的效果最好，1times的效果最差，那么它们之间有没有明显的差异性呢？P值的结果告诉我们，差异性很显著(P<0.001)。
+
+- 用plotmeans()来展示各组数据的均值和置信区间.
+```{r message=F,warning=F,collapse=T}
+library(gplots)
+plotmeans(response~trt,xlab = "Treatment",ylab="Response",main="Mean Plot with 95% CIs")
+```
+
+####2.多重比较
+ANOVA 的F检验值告诉我们各组之间存在差异性，但是并未说明具体哪两个组之间有差异性，哪两个组之间无差异性，为此，我们利用TukeyHSD()函数进行多重比较，对各组数据进行两两方差分析，得出具体结果。
+```{r message=F,warning=F,collapse=T}
+TukeyHSD(fit)
+```
+如此，我们发现，2times－1times，4times－2times，drugD－4times之间无显著差异，其余各组之间有显著差异，将结果以图示方式表现：
+```{r message=F,warning=F,collapse=T}
+par(las=2)#转动数轴标签
+par(mar=c(5,8,4,2))#增加左区域
+plot(TukeyHSD(fit))
+```
+
+- glht()函数可将模型更加形象地表现在图形上
+```{r message=F,warning=F,collapse=T}
+library(multcomp)
+par(mar=c(5,4,6,2))
+par(las=1)
+tuk<-glht(fit,linfct=mcp(trt="Tukey"))
+plot(cld(tuk,level=0.05),col="lightgrey")
+```
+各组的均值一目了然，且包含了置信区间的范围。各组之间的差异性可通过对比上方字母，若两组之间不含相同字母，则存在显著性差异。由此我们得出结论，durgE的治疗方法最好，4times和drugD之间无明显差异，4times相对1times较有效，drugD相对1times和2times治疗效果更好。
+
+####3.评估检验假设
+在方差分析实验中，通常假设各组数据服从正态分布，且各组方差相等。通过绘制qqplot图，我们可验证数据的正态性。
+```{r message=F,warning=F,collapse=T}
+library(car)
+qqPlot(lm(response~trt,data=cholesterol),simulate=T,main="Q-Q Plot",lables=F)
+##qqPlot要求线性拟合
+```
+几乎所有数据都落在95%置信区间内，因而正态性假设成立。
+
+- 用bartlett检验来验证各组方差的齐性。
+```{r message=F,warning=F,collapse=T}
+bartlett.test(response~trt,data=cholesterol)
+```
+结果表明各组之间的方差没有显著性差异。
+
+####4.单因素协方差分析(ANCOVA)
+数据集来源于multcomp包中的litter数据：药物剂量和出生体重的关系
+```{r message=F,warning=F,collapse=T}
+data(litter,package = "multcomp")
+attach(litter)
+table(dose)
+aggregate(weight,by=list(dose),FUN=mean)
+fit2<-aov(weight~gesttime+dose)
+summary(fit2)
+```
+ANCOVA的F检验表明：1.妊娠时间和出生重量有关联。2.药物剂量和出生重量有关联。
+同样的，利用上一节的多重比较，也能找出具体哪两个组显著性差异，这里不再做演示。
+
+- 评估模型假设
+除了验证正态性和方差齐性，对于协方差分析，还应验证变量之间的交互效应，即检验回归斜率是否相同。
+```{r message=F,warning=F,collapse=T}
+fit3<-aov(weight~gesttime*dose,data=litter)
+summary(fit3)
+```
+交互性gesttime:dose 不显著，说明斜率相等，即交互效应不存在。
+
+####5.方差分析可视化
+ancova()函数提供了各独立变量，协变量和因子的关系的图示。
+```{r message=F,warning=F,collapse=T}
+library(HH)
+ancova(weight~gesttime+dose,data=litter)
+```
+
+####6.两因素方差分析
+数据集为ToothGrowth，牙齿生长长度和喂食剂量，种类的关系。
+```{r message=F,warning=F,collapse=T}
+attach(ToothGrowth)
+table(supp,dose)
+aggregate(len,by=list(supp,dose),FUN=mean)
+fit4<-aov(len~supp*dose)
+summary(fit4)
+```
+table函数表明各实验组数据相等，aggregate函数给出了各实验组的数据均值，aov分析表明这两种方式均有助于牙齿的生长，且相互效应也存在。
+
+- 结果可视化
+```{r message=F,warning=F,collapse=T}
+library(gplots)
+interaction.plot(dose,supp,len,type="b",col=c("red","blue"),pch=c(16,18),main="Interaction between Dose and Supplement Type")
+```
+
+- 更具体地
+```{r message=F,warning=F,collapse=T}
+library(gplots)
+plotmeans(len~interaction(supp,dose,sep=" "),connect = list(c(1,3,5),c(2,4,6)),col=c("red","darkgreen"),main="Interaction Plot with 95% CIs",xlab="Treatment and Dose Combination")
+```
+分析发现，橙汁对于促进牙齿生长的效果要比维C效果好，且当剂量越大，牙齿生长越长。
+
+- 最后，用interaction2wt()函数来生成两因素交互影响
+```{r message=F,warning=F,collapse=T}
+library(HH)
+interaction2wt(len~supp+dose)
+```
+所有图形都能反映出，对于橙汁和维C，剂量增加，牙齿长度增加，对于0.5和1mg剂量，橙汁的效果比维C好。
+对于这三个图形，个人认为第三种图示方法更好，它不仅展示了主要影响，还能反应交互效应的影响，图形更加具体且美观。
+
+
+
