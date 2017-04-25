@@ -1,0 +1,142 @@
+---
+title: "GeneralizedLinearModel"
+author: "LSW"
+date: "2017/4/24"
+output: html_document
+---
+###前言
+之前介绍了线性回归和方差分析，探索了线性模型能用于预测符合正态分布的响应变量（来自连续型和分类型预测变量）。尽管如此，仍然有很多情况，我们无法合理地假设独立变量符合正态分布，例如：
+
+- 输出变量是分类型。二元变量（0/1，yes／no，成功／失败），类别变量，都不属于正态分布。
+
+- 输出变量是个计数（统计交通事故次数），这些变量有值域上的限制，且非负。另外它们的均值和方差是相关联的，而正态分布的均值和方差是独立的，说明它们不是正态分布。
+
+###1.广义线性模型
+这一节我们主要介绍两种重要的广义线性模型：Logistic regression（分类变量）和Possion regression（计数变量）。广义线性模型是线性模型的推广，它可以写成如下形式:
+
+$g(\mu _r)=\beta _0+\sum _{j=1}^p\beta _jX_j$
+这里$g(\mu _r)$是一个条件均值的函数，例如"logit","inverse","1/mu^2"这些在R包中称为link function.我们理解广义线性模型是通过g函数作用后变为线性模型，因而找到合适的link function g(x) 至关重要，下面是常用的link function：
+
+![](/Users/lee/Desktop/代码－数据科学/datascience_R/GeneralizedLInearModel/LinkFunction.png)
+
+- glm()function的常用函数
+```{r eval=F,collapse=T,message=F}
+summary()
+coefficients();coef()
+confint()
+residuals()
+anova()
+plot()
+predict()
+```
+
+###2.Logistic regression
+Logistic regression 用于从连续型和分类型预测变量中预测二元输出量，为此我们选取数据集Affairs，它记录了601组婚外情数据，变量包括性别，年龄，婚龄，是否有小孩，宗教信仰程度（1～5），学历、职业和婚姻的自我评价（1～5）。来看一些这个数据集的描述
+```{r message=F,collapse=T,warning=F}
+library(AER)
+data("Affairs")
+attach(Affairs)
+summary(Affairs)
+table(affairs)
+```
+####1).数据准备
+简单来看，该数据包括女性315人，男性286人，年龄从17～57岁，其中430人有孩子。从table()函数结果来看，无婚外情包括451人。尽管婚外情次数不等，我们在这里主要关心婚外情是否存在（binary outcome），故将affairs变量转换成因子变量：
+```{r message=F,collapse=T,warning=F}
+Affairs$ynaffair[affairs>0]<-1
+Affairs$ynaffair[affairs==0]<-0
+Affairs$ynaffair<-factor(Affairs$ynaffair,levels = c(0,1),labels = c("No","Yes"))
+table(Affairs$ynaffair)
+```
+
+####2)运用logistic regression 模型:
+```{r message=F,collapse=T,warning=F}
+fit<-glm(ynaffair~gender+age+yearsmarried+children+religiousness+education+occupation+rating,family = binomial(),data = Affairs)
+summary(fit)
+```
+从回归因子对应的p值看出，性别，育儿，教育，职业并不显著，因此，去除这几个变量后重新拟合。
+```{r}
+fit.remove<-glm(ynaffair~age+yearsmarried+religiousness+rating,data=Affairs,family = binomial())
+summary(fit.remove)
+```
+####3)剔除变量，调整模型
+调整后的模型，每个变量均显著，我们用anova()函数来对比这两个模型的优劣。
+```{r message=F,collapse=T,warning=F}
+anova(fit,fit.remove,test="Chisq")
+```
+p值的结果表明，剔除变量的模型和全变量的模型预测的效果类似，即剔除的变量对模型的预测没有影响，故我们偏向于采用更加简单的模型。
+
+####4)解释模型的参数
+```{r message=F,collapse=T,warning=F}
+coef(fit.remove)
+```
+给予logistic回归的模型参数，变量都进行了对数化log(odd)，可用指数化还原变量的值：
+```{r message=F,collapse=T,warning=F}
+exp(coef(fit.remove))
+```
+
+####5)评估预测变量对输出结果概率的影响
+利用predict()函数进行变量对模型预测结果的影响。首先创建一组随机的数据集，其中的age，yearsmarried，religiousness设为原数据集的均值，rating设置为1~5。
+```{r message=F,collapse=T,warning=F}
+testdata<-data.frame(rating=c(1,2,3,4,5),age=mean(Affairs$age),yearsmarried=mean(Affairs$yearsmarried),religiousness=mean(Affairs$religiousness))
+testdata$prob<-predict(fit.remove,newdata = testdata,type="response")
+testdata
+```
+固定其他四个变量之后，我们发现rating的值从1～5变化，导致婚外情概率从0.53降到0.15。
+同样的，我们研究年龄的变化对结果的影响：
+```{r message=F,collapse=T,warning=F}
+testdata<-data.frame(rating=mean(Affairs$rating),age=seq(17,57,10),yearsmarried=mean(Affairs$yearsmarried),religiousness=mean(Affairs$religiousness))
+testdata$prob<-predict(fit.remove,newdata = testdata,type="response")
+testdata
+```
+我们发现，年龄从17～57变化，婚外情概率从0.335降到0.11。可见rating的影响最大，其他的变量也可如此推断。
+
+####6)超散布性(overdispersion)
+在数据分析和建模的过程中，我们通常需要假设数据变量服从某个分布，再利用数据和估计方法对参数进行估计，当分布被确定后，均值和方差也被确定，若此时观测数据的方差系统地大于分布假设条件下的方差，就出现了“超散布性”，若小于系统方差，则出现了“超聚集性”。
+
+- 一种用于检测超散布性的方法是比较残差偏离值(Residual deviance)和自由度的比率，如果$\phi =Residual deviance/Residual df$ 大于1，则说明数据超散步性。
+下面利用Affair数据及进行演示：
+```{r message=F,collapse=T,warning=F}
+fit.remove$deviance/fit.remove$df.residual
+```
+值很接近1，说明“超散布性”不存在。
+
+- 另一种方法是，拟合模型两次，第一次family=binomial,第二次family=quasibinomial。然后进行卡方检验，原假设为$\phi =1$。
+```{r message=F,collapse=T,warning=F}
+fit.od<-glm(ynaffair~age+yearsmarried+religiousness+rating,family = binomial(),data=Affairs)
+fit.new<-glm(ynaffair~age+yearsmarried+religiousness+rating,family = quasibinomial(),data=Affairs)
+pchisq(summary(fit.new)$dispersion*fit.od$df.residual,fit.od$df.residual,lower=F)
+```
+P值结果为0.34，表明无显著性，证明“超散布性”不存在。
+
+####7)logistic 回归的扩展模型
+* 稳健logistic回归：glmRob()函数用于拟合稳健的广义线性模型，适用于拟合模型中数据存在离群点和强影响点。
+* 多项式分布回归：响应变量包含两个以上的无序类（例如已婚，寡居，离婚）时，可使用mlogit()函数拟合多项logistic回归。
+* 序数logistic回归：当响应变量是一组有序的类别（例如信用为好，良，差）时，可使用rms包中的lrm()函数拟合序数logistic回归。
+
+###2.Poisson回归
+Poisson回归对于预测变量是连续型和分类型，响应变量是计数型的模型很适用。他有两个假设条件：一是具备相同特征和同时的不同对象的人时风险时同质的，其次，当样本量越来越大时，频数的均值趋近于方差。 
+调用Poisson模型的公式如下：
+```{r message=F,collapse=T,warning=F,eval=F}
+myfit<-glm(y~x1+x2+...+xn,data=,family=possion)
+```
+####1)数据准备
+robust包中Breslow癫痫数据记录了治疗初期八周内，抗癫痫药物对癫痫发病数的影响。响应变量为sumY（随机化后八周内癫痫发病数），预测变量为治疗条件（Trt）、年龄（Age）和前八周内的基础癫痫发病数（Base），在这个数据集中，我们感兴趣的是药物治疗能否减少癫痫发病数。
+```{r message=F,collapse=T,warning=F}
+data(breslow.dat,package = "robust")
+library(ggplot2)
+g1<-ggplot(breslow.dat,aes(sumY))+geom_histogram(color="lightblue",binwidth = 15)
+g2<-ggplot(breslow.dat,aes(Trt,sumY))+geom_boxplot()
+library(gridExtra)
+grid.arrange(g1,g2,nrow=1)
+```
+从图中可以清楚的看到因变量的偏移特性及可能的离群点。药物治疗下癫痫的发病数似乎变小，且方差也变小了。
+
+####2)构建模型
+```{r message=F,collapse=T,warning=F}
+fit.Poisson<-glm(sumY~Base+Age+Trt,data=breslow.dat,family = poisson())
+summary(fit.Poisson)
+```
+结果说明治疗药物对癫痫的发病数有改善。
+
+- 关于低方差数据的Poisson建模，可参考统计之都的文章[Poisson分布低方差数据建模](https://cos.name/tag/纯生过程模型)。
+
